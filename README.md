@@ -44,6 +44,19 @@ The BTC Medusa additions live mainly under:
 
 ---
 
+## Verifying the zero-knowledge circuit
+
+The complete source of the Groth16 spend circuit — plus the production proving /
+verifying keys and the tooling to rebuild and check them — is published in a
+separate repository so anyone can independently audit exactly what the proofs
+prove:
+
+**→ [btc-medusa-circuit](https://github.com/vazertuche105/btc-medusa-circuit)**
+
+The `pk.bin` shipped in this wallet is the same proving key published there.
+
+---
+
 ## How it connects
 
 By default the wallet talks to the BTC Medusa server over its **`.onion`
