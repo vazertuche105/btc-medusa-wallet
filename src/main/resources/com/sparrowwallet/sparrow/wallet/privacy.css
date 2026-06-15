@@ -1,0 +1,120 @@
+/* Privacy tab styles */
+
+.privacy-score-label {
+    -fx-font-size: 24px;
+    -fx-font-weight: bold;
+}
+
+.privacy-good {
+    -fx-text-fill: #2e7d32;
+}
+
+.privacy-neutral {
+    -fx-text-fill: #f57f17;
+}
+
+.privacy-bad {
+    -fx-text-fill: #c62828;
+}
+
+.privacy-error {
+    -fx-text-fill: #757575;
+}
+
+.privacy-score-high {
+    -fx-text-fill: #2e7d32;
+}
+
+.privacy-score-medium {
+    -fx-text-fill: #f57f17;
+}
+
+.privacy-score-low {
+    -fx-text-fill: #c62828;
+}
+
+/* Overall letter grade */
+.privacy-letter-grade {
+    -fx-font-size: 96px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #555;
+    -fx-padding: 0 10 0 10;
+}
+
+.grade-a { -fx-text-fill: #2e7d32; }
+.grade-b { -fx-text-fill: #558b2f; }
+.grade-c { -fx-text-fill: #f57f17; }
+.grade-d { -fx-text-fill: #ef6c00; }
+.grade-f { -fx-text-fill: #c62828; }
+
+.privacy-downloading {
+    -fx-font-size: 11px;
+    -fx-text-fill: #555;
+    -fx-font-style: italic;
+}
+
+/* Token Issuance panel */
+.issuance-panel {
+    -fx-border-color: #ccc;
+    -fx-border-width: 1;
+    -fx-border-radius: 4;
+    -fx-background-color: -fx-background;
+    -fx-background-radius: 4;
+}
+
+.issuance-header {
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #333;
+}
+
+.issuance-value {
+    -fx-font-weight: bold;
+}
+
+.issuance-subheader {
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #555;
+}
+
+.issuance-detail-label {
+    -fx-text-fill: #666;
+    -fx-font-size: 11px;
+}
+
+.packs-table {
+    -fx-font-size: 11px;
+}
+
+.packs-table .column-header {
+    -fx-font-size: 11px;
+}
+
+.issuance-status {
+    -fx-font-size: 11px;
+    -fx-text-fill: #757575;
+    -fx-font-style: italic;
+}
+
+.issuance-connected {
+    -fx-text-fill: #2e7d32;
+    -fx-font-style: normal;
+    -fx-font-weight: bold;
+}
+
+.issuance-error {
+    -fx-text-fill: #c62828;
+    -fx-font-style: normal;
+}
+
+.demo-toggle {
+    -fx-font-size: 11px;
+    -fx-text-fill: #888;
+}
+
+.demo-active {
+    -fx-border-color: #f57f17;
+    -fx-border-width: 2;
+    -fx-border-style: dashed;
+}

@@ -1,0 +1,17 @@
+.idea
+.gradle
+*iml
+build
+/*.properties
+out
+*.log
+build-*.sh
+.DS_Store
+
+# Build outputs / packaging artifacts (never commit the bundled app)
+*.dmg
+*.app
+*.pkg
+/target
+/jpackage
+config.json

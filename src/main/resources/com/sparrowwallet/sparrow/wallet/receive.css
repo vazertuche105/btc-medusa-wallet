@@ -1,0 +1,29 @@
+.form .fieldset:horizontal .field {
+    -fx-pref-height: 40px;
+}
+
+.receive-form .form .fieldset:horizontal .label-container {
+    -fx-pref-width: 90px;
+}
+
+.qr-code {
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.8), 10, 0, 0, 0);
+    -fx-padding: 20;
+    -fx-cursor: hand;
+}
+
+.qr-code:hover {
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.5), 10, 0, 0, 0);
+}
+
+#spQrCode {
+    -fx-cursor: default;
+}
+
+#spQrCode:hover {
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.8), 10, 0, 0, 0);
+}
+
+#lastUsedField .input-container, #derivationField .input-container {
+    -fx-alignment: center-left;
+}

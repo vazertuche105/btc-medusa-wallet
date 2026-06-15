@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import java.lang.*?>
+<?import java.util.*?>
+<?import javafx.scene.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.image.Image?>
+<?import javafx.scene.image.ImageView?>
+<?import javafx.scene.layout.*?>
+<?import javafx.geometry.Insets?>
+<?import org.controlsfx.glyphfont.Glyph?>
+<?import tornadofx.control.Form?>
+<?import tornadofx.control.Fieldset?>
+<?import tornadofx.control.Field?>
+
+<BorderPane stylesheets="@privacy.css, @wallet.css, @../general.css" styleClass="wallet-pane" xmlns="http://javafx.com/javafx/10.0.2-internal" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.sparrowwallet.sparrow.wallet.PrivacyController">
+    <center>
+        <VBox spacing="10.0">
+            <padding>
+                <Insets left="25.0" right="25.0" top="25.0" bottom="25.0" />
+            </padding>
+
+            <!-- Summary header -->
+            <GridPane styleClass="send-form" hgap="10.0" vgap="10.0">
+                <columnConstraints>
+                    <ColumnConstraints percentWidth="65" />
+                    <ColumnConstraints percentWidth="35" />
+                </columnConstraints>
+                <rowConstraints>
+                    <RowConstraints />
+                </rowConstraints>
+
+                <!-- Privacy score fieldset + letter grade (left) -->
+                <HBox GridPane.columnIndex="0" GridPane.rowIndex="0" spacing="15" alignment="CENTER_LEFT">
+                    <Form prefWidth="300" minWidth="300" HBox.hgrow="ALWAYS">
+                        <Fieldset inputGrow="ALWAYS" text="Privacy Score" styleClass="header">
+                            <Field text="Score:">
+                                <Label fx:id="privacyScore" text="" styleClass="privacy-score-label" />
+                            </Field>
+                            <Field text="UTXOs:">
+                                <Label fx:id="utxoSummary" text="0 total" />
+                            </Field>
+                            <Field text="Status:">
+                                <Label fx:id="scanStatus" text="Not scanned" maxWidth="Infinity" />
+                            </Field>
+                        </Fieldset>
+                    </Form>
+                    <Label fx:id="letterGrade" text="" styleClass="privacy-letter-grade" />
+                </HBox>
+
+                <!-- Logo (top) + progress bar (bottom) on the right -->
+                <VBox GridPane.columnIndex="1" GridPane.rowIndex="0" spacing="10" alignment="TOP_RIGHT">
+                    <HBox alignment="TOP_RIGHT">
+                        <padding>
+                            <Insets top="30.0" />
+                        </padding>
+                        <ImageView fx:id="perseverusLogo" fitHeight="56" preserveRatio="true" smooth="true" visible="false" managed="false" />
+                    </HBox>
+                    <Region VBox.vgrow="ALWAYS" />
+                    <VBox alignment="CENTER" spacing="4">
+                        <padding>
+                            <Insets top="12.0" />
+                        </padding>
+                        <Label fx:id="downloadingLabel" text="" styleClass="privacy-downloading" maxWidth="Infinity" alignment="CENTER" />
+                        <ProgressBar fx:id="scanProgress" progress="0" prefWidth="300" minHeight="16" maxWidth="Infinity" visible="false" managed="false" />
+                        <HBox fx:id="scanProgressBox" alignment="CENTER" spacing="4" visible="false" managed="false">
+                            <Label fx:id="scanProgressLabel" text="" />
+                            <Label fx:id="downloadHelpIcon" visible="false" managed="false" />
+                        </HBox>
+                    </VBox>
+                </VBox>
+            </GridPane>
+
+            <!-- Results table -->
+            <BorderPane VBox.vgrow="ALWAYS">
+                <center>
+                    <TableView fx:id="resultsTable" VBox.vgrow="ALWAYS">
+                        <columns>
+                            <TableColumn fx:id="selectColumn" text="" prefWidth="40" sortable="false" resizable="false" editable="true" />
+                            <TableColumn fx:id="txidColumn" text="TXID" prefWidth="200" />
+                            <TableColumn fx:id="voutColumn" text="Vout" prefWidth="50" />
+                            <TableColumn fx:id="valueColumn" text="Value (sats)" prefWidth="120" />
+                            <TableColumn fx:id="heightColumn" text="Block Height" prefWidth="100" />
+                            <TableColumn fx:id="kycTagColumn" text="Grade" prefWidth="80" />
+                            <TableColumn fx:id="statusColumn" text="Status" prefWidth="120" />
+                            <TableColumn fx:id="detailsColumn" text="" prefWidth="80" sortable="false" resizable="false" />
+                        </columns>
+                        <placeholder>
+                            <Label text="No UTXOs available to scan" />
+                        </placeholder>
+                    </TableView>
+                </center>
+                <bottom>
+                    <VBox spacing="0">
+                        <padding>
+                            <Insets top="10.0" />
+                        </padding>
+                        <HBox spacing="8" alignment="BOTTOM_RIGHT">
+                            <HBox alignment="CENTER_LEFT" spacing="8" HBox.hgrow="ALWAYS">
+                                <Label text="Server:" />
+                                <TextField fx:id="serverUrl" text="http://medusayl5rrmgnekpabcduw7onhvdowmfart2mulq3b64chgzng52had.onion" prefWidth="200" />
+                                <Label fx:id="decoyLabel" text="Decoy #:" />
+                                <TextField fx:id="decoysField" text="0" prefWidth="55" maxWidth="55" />
+                            </HBox>
+                            <Button fx:id="perseverusButton" text="BTC Medusa" graphicTextGap="5" onAction="#openPerseverusWelcome" alignment="CENTER" contentDisplay="CENTER" minWidth="110" maxWidth="110">
+                                <graphic>
+                                    <Glyph fontFamily="Font Awesome 5 Free Solid" icon="SHIELD" fontSize="12" />
+                                </graphic>
+                            </Button>
+                            <Button fx:id="settingsButton" text="Settings" graphicTextGap="5" onAction="#openSettings" minWidth="85">
+                                <graphic>
+                                    <Glyph fontFamily="Font Awesome 5 Free Solid" icon="COG" fontSize="12" />
+                                </graphic>
+                            </Button>
+                            <Button fx:id="scanSelectedButton" text="Scan Selected" graphicTextGap="5" onAction="#startSelectedScan" minWidth="120">
+                                <graphic>
+                                    <Glyph fontFamily="Font Awesome 5 Free Solid" icon="CHECK_SQUARE" fontSize="12" />
+                                </graphic>
+                            </Button>
+                            <Button fx:id="scanButton" text="Scan All" graphicTextGap="5" onAction="#startScan" minWidth="80">
+                                <graphic>
+                                    <Glyph fontFamily="Font Awesome 5 Free Solid" icon="EYE" fontSize="12" />
+                                </graphic>
+                            </Button>
+                        </HBox>
+                        <!-- Make Payment row (shown programmatically after Manual payment choice) -->
+                        <HBox fx:id="makePaymentRow" spacing="10" alignment="CENTER_RIGHT" visible="false" managed="false">
+                            <padding>
+                                <Insets top="6.0" />
+                            </padding>
+                        </HBox>
+                        <!-- Invisible "secret" reset hit-region under the Server label for demo use. -->
+                        <HBox alignment="TOP_LEFT">
+                            <Region fx:id="resetArea" prefWidth="45" prefHeight="16" onMouseClicked="#resetDemo" style="-fx-cursor: hand;" />
+                        </HBox>
+                    </VBox>
+                </bottom>
+            </BorderPane>
+        </VBox>
+    </center>
+</BorderPane>

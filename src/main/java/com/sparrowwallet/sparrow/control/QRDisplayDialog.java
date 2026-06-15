@@ -1,0 +1,484 @@
+package com.sparrowwallet.sparrow.control;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.EncodeHintType;
+import com.google.zxing.client.j2se.MatrixToImageConfig;
+import com.google.zxing.client.j2se.MatrixToImageWriter;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.qrcode.QRCodeWriter;
+import com.sparrowwallet.hummingbird.LegacyUREncoder;
+import com.sparrowwallet.hummingbird.registry.RegistryType;
+import com.sparrowwallet.sparrow.AppServices;
+import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
+import com.sparrowwallet.sparrow.glyphfont.GlyphUtils;
+import com.sparrowwallet.sparrow.io.Config;
+import com.sparrowwallet.sparrow.io.ImportException;
+import com.sparrowwallet.hummingbird.UR;
+import com.sparrowwallet.hummingbird.UREncoder;
+import com.sparrowwallet.sparrow.io.bbqr.BBQR;
+import com.sparrowwallet.sparrow.io.bbqr.BBQREncoder;
+import com.sparrowwallet.sparrow.io.bbqr.BBQREncoding;
+import javafx.concurrent.ScheduledService;
+import javafx.concurrent.Task;
+import javafx.scene.Node;
+import javafx.scene.control.*;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.layout.StackPane;
+import javafx.util.Duration;
+import org.controlsfx.glyphfont.Glyph;
+import org.controlsfx.tools.Borders;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+
+@SuppressWarnings("deprecation")
+public class QRDisplayDialog extends Dialog<ButtonType> {
+    private static final Logger log = LoggerFactory.getLogger(QRDisplayDialog.class);
+
+    private static final int MIN_FRAGMENT_LENGTH = 10;
+
+    private static final double ANIMATION_PERIOD_MILLIS = 200d;
+
+    private static final int DEFAULT_QR_SIZE = 580;
+    private static final int REDUCED_QR_SIZE = 520;
+
+    private static final BBQREncoding DEFAULT_BBQR_ENCODING = BBQREncoding.ZLIB;
+
+    private final int qrSize = getQRSize();
+
+    private final UR ur;
+    private UREncoder urEncoder;
+
+    private final BBQR bbqr;
+    private BBQREncoder bbqrEncoder;
+
+    private final String raw;
+    private final boolean rawEncodable;
+
+    private QREncoding encoding = QREncoding.UR;
+
+    private final ImageView qrImageView;
+
+    private AnimateQRService animateQRService;
+    private String currentPart;
+
+    private boolean addLegacyEncodingOption;
+    private boolean useLegacyEncoding;
+    private String[] legacyParts;
+    private int legacyPartIndex;
+
+    private static boolean initialDensityChange;
+
+    public QRDisplayDialog(String type, byte[] data, boolean addLegacyEncodingOption) throws UR.URException {
+        this(UR.fromBytes(type, data), null, addLegacyEncodingOption, false, QREncoding.UR);
+    }
+
+    public QRDisplayDialog(UR ur) {
+        this(ur, null, false, false, QREncoding.UR);
+    }
+
+    public QRDisplayDialog(UR ur, BBQR bbqr, boolean addLegacyEncodingOption, boolean addScanButton, QREncoding defaultEncoding) {
+        this(ur, bbqr, null, addLegacyEncodingOption, addScanButton, defaultEncoding);
+    }
+
+    public QRDisplayDialog(UR ur, BBQR bbqr, String raw, boolean addLegacyEncodingOption, boolean addScanButton, QREncoding defaultEncoding) {
+        this.ur = ur;
+        this.bbqr = bbqr;
+        this.addLegacyEncodingOption = bbqr == null && addLegacyEncodingOption;
+
+        this.urEncoder = new UREncoder(ur, Config.get().getQrDensity().getMaxUrFragmentLength(), MIN_FRAGMENT_LENGTH, 0);
+
+        if(bbqr != null) {
+            this.bbqrEncoder = new BBQREncoder(bbqr.type(), DEFAULT_BBQR_ENCODING, bbqr.data(), Config.get().getQrDensity().getMaxBbqrFragmentLength(), 0);
+            if(defaultEncoding == QREncoding.BBQR || Config.get().getQrEncoding() == QREncoding.BBQR) {
+                encoding = QREncoding.BBQR;
+            }
+        }
+
+        this.raw = raw;
+        this.rawEncodable = raw != null && getQrCode(raw, true) != null;
+
+        final DialogPane dialogPane = new QRDisplayDialogPane();
+        setDialogPane(dialogPane);
+        AppServices.setStageIcon(dialogPane.getScene().getWindow());
+
+        StackPane stackPane = new StackPane();
+        qrImageView = new ImageView();
+        stackPane.getChildren().add(qrImageView);
+
+        qrImageView.setOnScroll(scrollEvent -> {
+            if(animateQRService != null && animateQRService.isRunning() && scrollEvent.getDeltaY() != 0) {
+                Duration duration = animateQRService.getPeriod();
+                Duration newDuration = scrollEvent.getDeltaY() > 0 ? duration.multiply(1.1) : duration.multiply(0.9);
+                if(newDuration.lessThan(Duration.millis(ANIMATION_PERIOD_MILLIS*10)) && newDuration.greaterThan(Duration.millis(ANIMATION_PERIOD_MILLIS/2))) {
+                    animateQRService.setPeriod(newDuration);
+                }
+            }
+        });
+
+        dialogPane.setContent(Borders.wrap(stackPane).lineBorder().buildAll());
+
+        nextPart();
+        if(isSinglePart()) {
+            qrImageView.setImage(getQrCode(currentPart));
+        } else {
+            createAnimateQRService();
+        }
+
+        final ButtonType cancelButtonType = new javafx.scene.control.ButtonType("Close", ButtonBar.ButtonData.CANCEL_CLOSE);
+        dialogPane.getButtonTypes().add(cancelButtonType);
+
+        if(this.addLegacyEncodingOption) {
+            final ButtonType legacyEncodingButtonType = new javafx.scene.control.ButtonType("Use Legacy Encoding (Cobo Vault)", ButtonBar.ButtonData.LEFT);
+            dialogPane.getButtonTypes().add(legacyEncodingButtonType);
+        } else {
+            final ButtonType densityButtonType = new javafx.scene.control.ButtonType("Change Density", ButtonBar.ButtonData.LEFT);
+            dialogPane.getButtonTypes().add(densityButtonType);
+        }
+
+        if(bbqr != null) {
+            final ButtonType bbqrButtonType = new javafx.scene.control.ButtonType("Show BBQr", ButtonBar.ButtonData.BACK_PREVIOUS);
+            dialogPane.getButtonTypes().add(bbqrButtonType);
+        }
+
+        if(addScanButton) {
+            final ButtonType scanButtonType = new javafx.scene.control.ButtonType("Scan QR", ButtonBar.ButtonData.OK_DONE);
+            dialogPane.getButtonTypes().add(scanButtonType);
+        }
+
+        ButtonBar buttonBar = (ButtonBar)dialogPane.lookup(".button-bar");
+        if(buttonBar != null) {
+            buttonBar.setButtonOrder("L+B+C+O");
+        }
+
+        dialogPane.setPrefWidth(40 + qrSize + 40);
+        dialogPane.setPrefHeight(40 + qrSize + 85);
+        dialogPane.setMinHeight(dialogPane.getPrefHeight());
+        AppServices.moveToActiveWindowScreen(this);
+
+        setResultConverter(dialogButton -> dialogButton);
+    }
+
+    public QRDisplayDialog(String data) {
+        this(data, false);
+    }
+
+    public QRDisplayDialog(String data, boolean addScanButton) {
+        this.ur = null;
+        this.bbqr = null;
+        this.raw = data;
+        this.urEncoder = null;
+        this.bbqrEncoder = null;
+        this.rawEncodable = true;
+
+        final DialogPane dialogPane = new QRDisplayDialogPane();
+        setDialogPane(dialogPane);
+        AppServices.setStageIcon(dialogPane.getScene().getWindow());
+
+        StackPane stackPane = new StackPane();
+        qrImageView = new ImageView();
+        stackPane.getChildren().add(qrImageView);
+
+        dialogPane.setContent(Borders.wrap(stackPane).lineBorder().buildAll());
+        qrImageView.setImage(getQrCode(data));
+
+        if(qrImageView.getImage() == null) {
+            Label warning = new Label("Message is too long for display as a QR code");
+            stackPane.getChildren().add(warning);
+        }
+
+        final ButtonType cancelButtonType = new javafx.scene.control.ButtonType("Close", ButtonBar.ButtonData.CANCEL_CLOSE);
+        dialogPane.getButtonTypes().addAll(cancelButtonType);
+
+        if(addScanButton) {
+            final ButtonType scanButtonType = new javafx.scene.control.ButtonType("Scan QR", ButtonBar.ButtonData.OK_DONE);
+            dialogPane.getButtonTypes().add(scanButtonType);
+        }
+
+        dialogPane.setPrefWidth(40 + qrSize + 40);
+        dialogPane.setPrefHeight(40 + qrSize + 85);
+        dialogPane.setMinHeight(dialogPane.getPrefHeight());
+        AppServices.moveToActiveWindowScreen(this);
+
+        setResultConverter(dialogButton -> dialogButton);
+    }
+
+    private int getQRSize() {
+        return AppServices.isReducedWindowHeight() ? REDUCED_QR_SIZE : DEFAULT_QR_SIZE;
+    }
+
+    private void createAnimateQRService() {
+        animateQRService = new AnimateQRService();
+        animateQRService.setPeriod(Duration.millis(ANIMATION_PERIOD_MILLIS));
+        animateQRService.start();
+        setOnCloseRequest(event -> {
+            animateQRService.cancel();
+        });
+    }
+
+    private boolean isSinglePart() {
+        if(encoding == QREncoding.RAW) {
+            return true;
+        } else if(encoding == QREncoding.BBQR) {
+            return bbqrEncoder.isSinglePart();
+        } else if(!useLegacyEncoding) {
+            return urEncoder.isSinglePart();
+        } else {
+            return legacyParts.length == 1;
+        }
+    }
+
+    private void nextPart() {
+        if(encoding == QREncoding.RAW) {
+            currentPart = raw;
+        } else if(encoding == QREncoding.BBQR) {
+            String fragment = bbqrEncoder.nextPart();
+            currentPart = fragment.toUpperCase(Locale.ROOT);
+        } else if(!useLegacyEncoding) {
+            String fragment = urEncoder.nextPart();
+            currentPart = fragment.toUpperCase(Locale.ROOT);
+        } else {
+            currentPart = legacyParts[legacyPartIndex];
+            legacyPartIndex++;
+            if(legacyPartIndex > legacyParts.length - 1) {
+                legacyPartIndex = 0;
+            }
+        }
+    }
+
+    protected Image getQrCode(String fragment) {
+        return getQrCode(fragment, false);
+    }
+
+    protected Image getQrCode(String fragment, boolean trial) {
+        try {
+            QRCodeWriter qrCodeWriter = new QRCodeWriter();
+            BitMatrix qrMatrix = qrCodeWriter.encode(fragment, BarcodeFormat.QR_CODE, qrSize, qrSize, Map.of(EncodeHintType.MARGIN, "2"));
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            MatrixToImageWriter.writeToStream(qrMatrix, "PNG", baos, new MatrixToImageConfig());
+
+            ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
+            return new Image(bais);
+        } catch(Exception e) {
+            if(!trial) {
+                log.error("Error generating QR", e);
+            }
+        }
+
+        return null;
+    }
+
+    private void setUseLegacyEncoding(boolean useLegacyEncoding) {
+        if(useLegacyEncoding) {
+            try {
+                //Force to be bytes type for legacy encoding
+                LegacyUREncoder legacyEncoder = new LegacyUREncoder(new UR(RegistryType.BYTES.toString(), ur.getCborBytes()));
+                this.legacyParts = legacyEncoder.encode();
+                this.useLegacyEncoding = true;
+
+                restartAnimation();
+            } catch(UR.InvalidTypeException e) {
+                //Can't happen
+            }
+        } else {
+            this.useLegacyEncoding = false;
+            restartAnimation();
+        }
+    }
+
+    public QREncoding getEncoding() {
+        return encoding;
+    }
+
+    private void setEncoding(QREncoding encoding) {
+        this.encoding = encoding;
+        restartAnimation();
+    }
+
+    private void changeQRDensity() {
+        if(animateQRService != null) {
+            animateQRService.cancel();
+        }
+
+        if(bbqr != null) {
+            this.bbqrEncoder = new BBQREncoder(bbqr.type(), DEFAULT_BBQR_ENCODING, bbqr.data(), Config.get().getQrDensity().getMaxBbqrFragmentLength(), 0);
+        }
+
+        this.urEncoder = new UREncoder(ur, Config.get().getQrDensity().getMaxUrFragmentLength(), MIN_FRAGMENT_LENGTH, 0);
+
+        restartAnimation();
+    }
+
+    private void restartAnimation() {
+        if(isSinglePart()) {
+            if(animateQRService != null) {
+                animateQRService.cancel();
+            }
+
+            nextPart();
+            qrImageView.setImage(getQrCode(currentPart));
+        } else if(animateQRService == null) {
+            createAnimateQRService();
+        } else if(!animateQRService.isRunning()) {
+            animateQRService.reset();
+            animateQRService.start();
+        }
+    }
+
+    private class AnimateQRService extends ScheduledService<Boolean> {
+        @Override
+        protected Task<Boolean> createTask() {
+            return new Task<>() {
+                protected Boolean call() throws ImportException {
+                    Image qrImage = getQrCode(currentPart);
+                    qrImageView.setImage(qrImage);
+                    nextPart();
+
+                    return true;
+                }
+            };
+        }
+    }
+
+    private class QRDisplayDialogPane extends DialogPane {
+        @Override
+        protected Node createButton(ButtonType buttonType) {
+            if(buttonType.getButtonData() == ButtonBar.ButtonData.LEFT) {
+                if(addLegacyEncodingOption) {
+                    ToggleButton legacy = new ToggleButton(buttonType.getText());
+                    legacy.setGraphicTextGap(5);
+                    setLegacyGraphic(legacy, false);
+
+                    final ButtonBar.ButtonData buttonData = buttonType.getButtonData();
+                    ButtonBar.setButtonData(legacy, buttonData);
+                    legacy.selectedProperty().addListener((observable, oldValue, newValue) -> {
+                        setUseLegacyEncoding(newValue);
+                        setLegacyGraphic(legacy, newValue);
+                    });
+
+                    return legacy;
+                } else {
+                    Button density = new Button(buttonType.getText());
+                    density.setPrefWidth(160);
+                    density.setGraphicTextGap(5);
+                    updateDensityButton(density);
+
+                    final ButtonBar.ButtonData buttonData = buttonType.getButtonData();
+                    ButtonBar.setButtonData(density, buttonData);
+                    density.setOnAction(event -> {
+                        if(!initialDensityChange && !isSinglePart()) {
+                            Optional<ButtonType> optButtonType = AppServices.showWarningDialog("Discard progress?", "Changing the QR code density means any progress on the receiving device must be discarded. Proceed?", ButtonType.NO, ButtonType.YES);
+                            if(optButtonType.isPresent() && optButtonType.get() == ButtonType.YES) {
+                                initialDensityChange = true;
+                            } else {
+                                return;
+                            }
+                        }
+
+                        Config.get().setQrDensity(Config.get().getQrDensity() == QRDensity.NORMAL ? QRDensity.LOW : QRDensity.NORMAL);
+                        updateDensityButton(density);
+                        changeQRDensity();
+                    });
+
+                    return density;
+                }
+            } else if(buttonType.getButtonData() == ButtonBar.ButtonData.OK_DONE) {
+                Button scanButton = (Button)super.createButton(buttonType);
+                scanButton.setGraphicTextGap(5);
+                scanButton.setGraphic(getGlyph(FontAwesome5.Glyph.CAMERA));
+
+                return scanButton;
+            } else if(buttonType.getButtonData() == ButtonBar.ButtonData.BACK_PREVIOUS) {
+                ComboBox<QREncoding> encodingComboBox = new ComboBox<>();
+                if(ur != null) {
+                    encodingComboBox.getItems().add(QREncoding.UR);
+                }
+                if(bbqr != null) {
+                    encodingComboBox.getItems().add(QREncoding.BBQR);
+                }
+                if(raw != null) {
+                    encodingComboBox.getItems().add(QREncoding.RAW);
+                }
+
+                encodingComboBox.setCellFactory(_ -> new QREncodingListCell());
+                encodingComboBox.setButtonCell(new QREncodingButtonCell());
+                encodingComboBox.setValue(encoding);
+                encodingComboBox.setOnAction(_ -> {
+                    setEncoding(encodingComboBox.getValue());
+                    Config.get().setQrEncoding(encodingComboBox.getValue());
+                });
+
+                final ButtonBar.ButtonData buttonData = buttonType.getButtonData();
+                ButtonBar.setButtonData(encodingComboBox, buttonData);
+
+                return encodingComboBox;
+            }
+
+            return super.createButton(buttonType);
+        }
+
+        private void setLegacyGraphic(ToggleButton legacy, boolean useLegacyEncoding) {
+            if(useLegacyEncoding) {
+                legacy.setGraphic(getGlyph(FontAwesome5.Glyph.CHECK_CIRCLE));
+            } else {
+                legacy.setGraphic(getGlyph(FontAwesome5.Glyph.BAN));
+            }
+        }
+
+        private void updateDensityButton(Button density) {
+            density.setText(Config.get().getQrDensity() == QRDensity.NORMAL ? "Less Dense" : "More Dense");
+            if(Config.get().getQrDensity() == QRDensity.NORMAL) {
+                density.setGraphic(getGlyph(FontAwesome5.Glyph.MAGNIFYING_GLASS_PLUS));
+            } else {
+                density.setGraphic(getGlyph(FontAwesome5.Glyph.MAGNIFYING_GLASS_MINUS));
+            }
+        }
+    }
+
+    protected static Glyph getGlyph(FontAwesome5.Glyph glyphName) {
+        Glyph glyph = new Glyph(FontAwesome5.FONT_NAME, glyphName);
+        glyph.setFontSize(11);
+        return glyph;
+    }
+
+    private class QREncodingListCell extends ListCell<QREncoding> {
+        @Override
+        protected void updateItem(QREncoding item, boolean empty) {
+            super.updateItem(item, empty);
+            if(empty || item == null) {
+                setText(null);
+                setGraphic(null);
+                setDisable(false);
+                setOpacity(1.0);
+            } else {
+                setText(item.getName() + " Encoding");
+                setGraphic(item.getSVGImage());
+                setGraphicTextGap(8.0d);
+                setDisable(item == QREncoding.RAW && !rawEncodable);
+                setOpacity(isDisabled() ? 0.5 : 1.0);
+            }
+        }
+    }
+
+    private static class QREncodingButtonCell extends ListCell<QREncoding> {
+        @Override
+        protected void updateItem(QREncoding item, boolean empty) {
+            super.updateItem(item, empty);
+            if(item == null || empty) {
+                setText("");
+                setGraphic(null);
+            } else {
+                setText(item.getName());
+                setGraphic(item.getSVGImage());
+                setGraphicTextGap(8.0d);
+            }
+        }
+    }
+}

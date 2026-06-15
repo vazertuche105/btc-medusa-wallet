@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import java.lang.*?>
+<?import java.util.*?>
+<?import javafx.scene.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<?import javafx.geometry.Insets?>
+<?import tornadofx.control.Form?>
+<?import tornadofx.control.Fieldset?>
+<?import tornadofx.control.Field?>
+<?import javafx.scene.image.ImageView?>
+<?import org.fxmisc.flowless.VirtualizedScrollPane?>
+<?import com.sparrowwallet.sparrow.control.CopyableLabel?>
+<?import org.controlsfx.glyphfont.Glyph?>
+<?import com.sparrowwallet.sparrow.control.CopyableTextField?>
+<?import com.sparrowwallet.sparrow.control.ScriptArea?>
+<?import com.sparrowwallet.sparrow.control.SelectableCodeArea?>
+
+<BorderPane stylesheets="@receive.css, @wallet.css, @../script.css, @../descriptor.css, @../general.css" styleClass="wallet-pane" xmlns="http://javafx.com/javafx/10.0.2-internal" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.sparrowwallet.sparrow.wallet.ReceiveController">
+    <center>
+
+        <GridPane styleClass="receive-form" hgap="10.0" vgap="10.0">
+            <padding>
+                <Insets left="25.0" right="25.0" top="25.0" />
+            </padding>
+            <columnConstraints>
+                <ColumnConstraints prefWidth="620" hgrow="SOMETIMES" />
+                <ColumnConstraints prefWidth="140" />
+            </columnConstraints>
+            <rowConstraints>
+                <RowConstraints />
+            </rowConstraints>
+            <Form fx:id="receiveForm" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                <Fieldset inputGrow="ALWAYS" text="Receive" styleClass="header">
+                    <Field text="Address:">
+                        <CopyableTextField fx:id="address" styleClass="address-text-field" editable="false"/>
+                    </Field>
+                    <Field text="Label:">
+                        <TextField fx:id="label" />
+                    </Field>
+                    <Field text="Derivation:">
+                        <CopyableLabel fx:id="derivationPath" />
+                    </Field>
+                    <Field text="Last Used:">
+                        <Label fx:id="lastUsed" />
+                    </Field>
+                </Fieldset>
+            </Form>
+
+            <AnchorPane fx:id="qrCodePane" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                <ImageView fx:id="qrCode" styleClass="qr-code" AnchorPane.rightAnchor="5"/>
+            </AnchorPane>
+
+            <Form fx:id="spReceiveForm" GridPane.columnIndex="0" GridPane.rowIndex="0">
+                <padding>
+                    <Insets bottom="10" />
+                </padding>
+                <Fieldset inputGrow="ALWAYS" text="Receive" styleClass="header">
+                    <Field text="Address:">
+                        <TextArea fx:id="spAddress" styleClass="address-text-field" wrapText="true" prefRowCount="2" maxHeight="52" editable="false" />
+                    </Field>
+                </Fieldset>
+            </Form>
+
+            <AnchorPane fx:id="spCopyPane" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                <padding>
+                    <Insets bottom="10" />
+                </padding>
+                <Button text="Copy" graphicTextGap="10" AnchorPane.rightAnchor="5" AnchorPane.bottomAnchor="18" prefHeight="52" prefWidth="100" onAction="#copySilentPaymentsAddress">
+                    <graphic>
+                        <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="12" icon="COPY" />
+                    </graphic>
+                </Button>
+            </AnchorPane>
+
+            <Separator styleClass="form-separator" GridPane.columnIndex="0" GridPane.columnSpan="2" GridPane.rowIndex="1" />
+
+            <Form fx:id="scriptPubKeyForm" GridPane.columnIndex="0" GridPane.columnSpan="2" GridPane.rowIndex="2">
+                <Fieldset inputGrow="SOMETIMES" text="Required ScriptPubKey">
+                    <Field text="Script:">
+                        <VirtualizedScrollPane>
+                            <content>
+                                <ScriptArea fx:id="scriptPubKeyArea" editable="false" wrapText="true" prefHeight="47" maxHeight="47" styleClass="uneditable-codearea" />
+                            </content>
+                        </VirtualizedScrollPane>
+                    </Field>
+                </Fieldset>
+            </Form>
+
+            <Form fx:id="outputDescriptorForm" GridPane.columnIndex="0" GridPane.columnSpan="2" GridPane.rowIndex="3">
+                <Fieldset inputGrow="SOMETIMES" text="Output Descriptor">
+                    <Field text="Descriptor:">
+                        <VirtualizedScrollPane>
+                            <content>
+                                <SelectableCodeArea fx:id="outputDescriptor" editable="false" wrapText="true" prefHeight="68" maxHeight="68" styleClass="uneditable-codearea" />
+                            </content>
+                        </VirtualizedScrollPane>
+                    </Field>
+                </Fieldset>
+            </Form>
+
+            <Form fx:id="spQrForm" GridPane.columnIndex="0" GridPane.rowIndex="2" alignment="CENTER">
+                <Fieldset inputGrow="SOMETIMES" text="">
+                    <Field text="">
+                        <ImageView fx:id="spQrCode" styleClass="qr-code" />
+                    </Field>
+                </Fieldset>
+            </Form>
+
+        </GridPane>
+    </center>
+    <bottom>
+        <AnchorPane>
+            <padding>
+                <Insets left="25.0" right="25.0" bottom="25.0" />
+            </padding>
+            <HBox AnchorPane.rightAnchor="10">
+                <Button fx:id="displayAddress" graphicTextGap="5" text="Display Address" AnchorPane.rightAnchor="10" onAction="#displayAddress">
+                    <graphic>
+                        <Glyph fontFamily="Font Awesome 5 Brands Regular" fontSize="12" icon="USB" />
+                    </graphic>
+                </Button>
+                <Region HBox.hgrow="ALWAYS" style="-fx-min-width: 20px" />
+                <Button fx:id="nextAddress" graphicTextGap="5" text="Get Next Address" defaultButton="true" AnchorPane.rightAnchor="10" onAction="#getNewAddress">
+                    <graphic>
+                        <Glyph fontFamily="FontAwesome" icon="ARROW_DOWN" fontSize="12" />
+                    </graphic>
+                </Button>
+            </HBox>
+        </AnchorPane>
+    </bottom>
+</BorderPane>

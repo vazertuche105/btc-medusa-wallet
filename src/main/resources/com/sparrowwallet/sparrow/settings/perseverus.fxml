@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import java.lang.*?>
+<?import java.util.*?>
+<?import javafx.scene.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<?import tornadofx.control.Form?>
+<?import tornadofx.control.Fieldset?>
+<?import tornadofx.control.Field?>
+<?import javafx.collections.FXCollections?>
+<?import javafx.geometry.Insets?>
+<?import com.sparrowwallet.sparrow.control.UnlabeledToggleSwitch?>
+<?import com.sparrowwallet.sparrow.control.HelpLabel?>
+<?import org.controlsfx.glyphfont.Glyph?>
+
+<ScrollPane fitToWidth="true" hbarPolicy="NEVER" vbarPolicy="AS_NEEDED" style="-fx-background-color: transparent;" stylesheets="@settings.css, @../general.css" xmlns="http://javafx.com/javafx/10.0.2-internal" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.sparrowwallet.sparrow.settings.PerseverusSettingsController">
+<GridPane hgap="10.0" vgap="10.0">
+    <padding>
+        <Insets left="25.0" right="25.0" top="25.0" bottom="25.0" />
+    </padding>
+    <columnConstraints>
+        <ColumnConstraints percentWidth="100" />
+    </columnConstraints>
+    <rowConstraints>
+        <RowConstraints />
+    </rowConstraints>
+
+    <Form GridPane.columnIndex="0" GridPane.rowIndex="0">
+        <Fieldset inputGrow="SOMETIMES" text="Privacy Transport" styleClass="wideLabelFieldSet">
+            <Field text="Transport mode:">
+                <ComboBox fx:id="transportMode" />
+                <HelpLabel helpText="Controls how your wallet connects to the BTC Medusa server. OHTTP hides your IP via a relay. Tor routes through the Tor network for maximum anonymity. Direct connects without any privacy relay."/>
+            </Field>
+            <Field text="Transport status:">
+                <Label fx:id="transportStatus" text="Not connected" />
+            </Field>
+        </Fieldset>
+        <Fieldset inputGrow="SOMETIMES" text="OHTTP Relay" styleClass="wideLabelFieldSet">
+            <Field text="Relay URL:">
+                <TextField fx:id="ohttpRelayUrl" promptText="https://relay.btcmedusa.com/ohttp" />
+                <HelpLabel helpText="The Oblivious HTTP relay URL. The relay forwards your encrypted request to the BTC Medusa server without the server seeing your IP address. The default relay is operated by BTC Medusa."/>
+            </Field>
+        </Fieldset>
+        <Fieldset inputGrow="SOMETIMES" text="Tor" styleClass="wideLabelFieldSet">
+            <Field text="Enable Tor:">
+                <UnlabeledToggleSwitch fx:id="torEnabled" />
+                <HelpLabel helpText="Route BTC Medusa API calls through an embedded Tor client (Arti). Provides the strongest IP privacy but may be slower. No external Tor software needed."/>
+            </Field>
+            <Field text="Tor status:">
+                <Label fx:id="torStatus" text="Disabled" />
+            </Field>
+        </Fieldset>
+        <Fieldset inputGrow="SOMETIMES" text="BTC Medusa Server" styleClass="wideLabelFieldSet">
+            <Field text="Server URL:">
+                <TextField fx:id="serverUrl" promptText="http://medusayl5rrmgnekpabcduw7onhvdowmfart2mulq3b64chgzng52had.onion" />
+                <HelpLabel helpText="The BTC Medusa API server URL. Change this only if you are running your own server instance."/>
+            </Field>
+            <Field text="Server pubkey:">
+                <TextField fx:id="serverPubkey" promptText="Server public key (hex)" />
+                <HelpLabel helpText="The server's public key used for VOPRF token issuance and DLEQ signature verification. Must match the key published by the server operator."/>
+            </Field>
+        </Fieldset>
+        <Fieldset inputGrow="SOMETIMES" text="Advanced Decoy Selection" styleClass="wideLabelFieldSet">
+            <Field text="Decoy #:">
+                <TextField fx:id="settingsDecoysField" text="0" prefWidth="60" maxWidth="60" />
+                <Label text="Range:" style="-fx-padding: 0 0 0 15;" />
+                <ComboBox fx:id="decoyRange" />
+                <HelpLabel helpText="Number of decoy block filters downloaded per real UTXO block. Range controls how far in time the decoys spread: 1 Day (~150 blocks), 1 Week (~1100 blocks), 1 Month (~4500 blocks)."/>
+            </Field>
+            <Field text="Spread:">
+                <Slider fx:id="scaleSlider" min="1.0" max="150.0" value="15.0" prefWidth="170" showTickLabels="false" showTickMarks="false" blockIncrement="1.0" />
+                <Label fx:id="scaleValueLabel" text="15" prefWidth="55" />
+                <Label fx:id="spreadLabel" text="blocks" style="-fx-text-fill: #757575; -fx-font-size: 11;" />
+                <HelpLabel helpText="Controls how far decoy blocks spread from your real block. Higher values spread decoys over a wider range. 95% of decoys will fall within the ± range shown."/>
+            </Field>
+        </Fieldset>
+        <Fieldset inputGrow="SOMETIMES" text="Token Backup" styleClass="wideLabelFieldSet">
+            <Field text="">
+                <Label text="Your privacy tokens live only on this computer. They are NOT recoverable from your seed phrase or hardware wallet — back them up like a wallet file, or you will lose your remaining scans if this device is wiped or replaced." wrapText="true" maxWidth="Infinity" minHeight="60" HBox.hgrow="ALWAYS" style="-fx-text-fill: #f57f17;" />
+            </Field>
+            <Field text="Backup:">
+                <Button fx:id="exportTokens" text="Export tokens…" />
+                <Button fx:id="importTokens" text="Import tokens…" />
+                <HelpLabel helpText="Export writes your remaining tokens to a file you choose. That file holds spendable secrets — treat it like a private key: store it securely and separately from your seed, because anyone who obtains it can spend your tokens. Import loads tokens from such a file (for example after reinstalling, or moving to a new computer)."/>
+            </Field>
+            <Field text="">
+                <Label fx:id="tokenBackupStatus" text="" wrapText="true" maxWidth="Infinity" HBox.hgrow="ALWAYS" style="-fx-font-size: 11;" />
+            </Field>
+        </Fieldset>
+    </Form>
+</GridPane>
+</ScrollPane>

@@ -1,0 +1,4 @@
+rootProject.name = 'sparrow'
+include 'drongo'
+include 'lark'
+

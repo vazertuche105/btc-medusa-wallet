@@ -1,0 +1,114 @@
+name: Windows Installer (.exe)
+
+# Builds the downloadable BTC Medusa Windows .exe installer on a Windows runner,
+# including the perseverus native Rust DLL. No local Windows machine needed:
+# trigger this from the Actions tab and download the .exe artifact.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   PERSEVERUS_REPO_URL   git URL of the PRIVATE perseverus repo that contains
+#                         the `client-native` Rust crate,
+#                         e.g. https://github.com/youruser/perseverus.git
+#   PERSEVERUS_TOKEN      a GitHub Personal Access Token (or fine-grained token)
+#                         with read access to that repo. Used to clone it.
+#
+# The crate is expected at <perseverus repo>/client-native (same layout the
+# package-win.ps1 / package-mac.sh scripts assume).
+
+on:
+  workflow_dispatch:
+    inputs:
+      perseverus_ref:
+        description: 'Branch/tag/commit of the perseverus repo to build (default: main)'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout sparrow-fork (with drongo/lark submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Clear Java tool-cache for reproducibility
+        shell: bash
+        run: rm -rf "$RUNNER_TOOL_CACHE"/Java_*
+
+      - name: Set up JDK 25.0.2
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25.0.2'
+
+      - name: Set up Rust (MSVC toolchain)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install WiX Toolset 3.x
+        shell: pwsh
+        run: choco install wixtoolset -y --no-progress
+
+      - name: Clone private perseverus repo
+        shell: pwsh
+        env:
+          PERSEVERUS_REPO_URL: ${{ secrets.PERSEVERUS_REPO_URL }}
+          PERSEVERUS_TOKEN: ${{ secrets.PERSEVERUS_TOKEN }}
+        run: |
+          if (-not $env:PERSEVERUS_REPO_URL) { throw "Secret PERSEVERUS_REPO_URL is not set." }
+          if (-not $env:PERSEVERUS_TOKEN)    { throw "Secret PERSEVERUS_TOKEN is not set." }
+          # Inject the token into the https URL so the private clone authenticates.
+          $authUrl = $env:PERSEVERUS_REPO_URL -replace '^https://', "https://x-access-token:$($env:PERSEVERUS_TOKEN)@"
+          git clone --depth 1 --branch "${{ github.event.inputs.perseverus_ref }}" $authUrl perseverus
+          if (-not (Test-Path "perseverus\client-native\Cargo.toml")) {
+            throw "perseverus\client-native\Cargo.toml not found - check the repo layout / ref."
+          }
+
+      - name: Build native DLL (cargo build --release) and place in resources
+        shell: pwsh
+        run: |
+          Push-Location perseverus\client-native
+          cargo build --release --target x86_64-pc-windows-msvc
+          Pop-Location
+          $built = "perseverus\client-native\target\x86_64-pc-windows-msvc\release\perseverus_client_native.dll"
+          if (-not (Test-Path $built)) {
+            # Fall back to the default target dir if a non-triple build was produced.
+            $built = "perseverus\client-native\target\release\perseverus_client_native.dll"
+          }
+          if (-not (Test-Path $built)) { throw "cargo did not produce perseverus_client_native.dll." }
+          $dest = "src\main\resources\native\windows\x64\perseverus_client_native.dll"
+          New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+          Copy-Item $built $dest -Force
+          Write-Host "Copied $built -> $dest"
+
+      - name: Show build versions
+        run: ./gradlew -v
+
+      - name: Build .exe installer (jpackage)
+        run: ./gradlew clean jpackage
+
+      - name: Locate installer
+        id: find
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path "build\jpackage" -Filter *.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -eq $exe) { throw "No .exe produced under build\jpackage." }
+          Write-Host "Installer: $($exe.FullName)"
+          "exe_path=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          # Publish the SHA-256 so downloaders can verify the file.
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          Write-Host "SHA-256: $hash"
+          "$hash  $($exe.Name)" | Out-File -FilePath "build\jpackage\$($exe.BaseName).sha256.txt" -Encoding ascii
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTC-Medusa-Windows-x64
+          path: |
+            build/jpackage/*.exe
+            build/jpackage/*.sha256.txt
+          if-no-files-found: error

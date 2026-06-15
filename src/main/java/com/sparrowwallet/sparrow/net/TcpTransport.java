@@ -1,0 +1,385 @@
+package com.sparrowwallet.sparrow.net;
+
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.github.arteam.simplejsonrpc.server.JsonRpcServer;
+import com.google.common.base.Splitter;
+import com.google.common.net.HostAndPort;
+import com.sparrowwallet.sparrow.io.Config;
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.net.SocketFactory;
+import javax.net.ssl.SSLHandshakeException;
+import java.io.*;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class TcpTransport implements CloseableTransport, TimeoutCounter {
+    private static final Logger log = LoggerFactory.getLogger(TcpTransport.class);
+    private static final Logger wireLog = LoggerFactory.getLogger("electrum.wire");
+
+    public static final int DEFAULT_MAX_TIMEOUT = 34;
+    private static final int[] BASE_READ_TIMEOUT_SECS = {3, 8, 16, DEFAULT_MAX_TIMEOUT};
+    private static final int[] TOR_READ_TIMEOUT_SECS = {5, 10, 20, DEFAULT_MAX_TIMEOUT};
+    private static final int[] SLOW_READ_TIMEOUT_SECS = {34, 68, 124, 208};
+    public static final long PER_REQUEST_READ_TIMEOUT_MILLIS = 50;
+    public static final int SOCKET_READ_TIMEOUT_MILLIS = 5000;
+    private static final Pattern ID_PATTERN = Pattern.compile("\"id\"\\s*:\\s*(\\d+)");
+    private static final JsonFactory JSON_FACTORY = new JsonFactory();
+
+    protected final HostAndPort server;
+    protected final SocketFactory socketFactory;
+    protected final int[] readTimeouts;
+
+    protected Socket socket;
+
+    private String response;
+
+    private final CountDownLatch readReadySignal = new CountDownLatch(1);
+
+    private final ReentrantLock readLock = new ReentrantLock();
+    private final Condition readingCondition = readLock.newCondition();
+
+    private final ReentrantLock clientRequestLock = new ReentrantLock();
+    private volatile boolean running = false;
+    private volatile boolean reading = true;
+    private volatile boolean closed = false;
+    private boolean firstRead = true;
+    private int readTimeoutIndex;
+    private int requestIdCount = 1;
+
+    private final JsonRpcServer jsonRpcServer = new JsonRpcServer();
+    private final SubscriptionService subscriptionService = new SubscriptionService();
+
+    private Exception lastException;
+
+    public TcpTransport(HostAndPort server) {
+        this(server, null);
+    }
+
+    public TcpTransport(HostAndPort server, HostAndPort proxy) {
+        this.server = server;
+        this.socketFactory = (proxy == null ? SocketFactory.getDefault() : new ProxySocketFactory(proxy));
+
+        int[] baseTimeouts;
+        if(Config.get().getServerType() == ServerType.BITCOIN_CORE && Protocol.isOnionAddress(Config.get().getCoreServer())) {
+            baseTimeouts = SLOW_READ_TIMEOUT_SECS;
+        } else if(proxy != null) {
+            baseTimeouts = TOR_READ_TIMEOUT_SECS;
+        } else {
+            baseTimeouts = BASE_READ_TIMEOUT_SECS;
+        }
+        int[] timeouts = Arrays.copyOf(baseTimeouts, baseTimeouts.length);
+        if(Config.get().getMaxServerTimeout() > timeouts[timeouts.length - 1]) {
+            timeouts[timeouts.length - 1] = Config.get().getMaxServerTimeout();
+        }
+        this.readTimeouts = timeouts;
+    }
+
+    @Override
+    public @NotNull String pass(@NotNull String request) throws IOException {
+        Set<String> sentIdSet = extractIdSet(request);
+        clientRequestLock.lock();
+        try {
+            //Count number of requests in batched query to increase read timeout appropriately
+            requestIdCount = Splitter.on("\"id\"").splitToList(request).size() - 1;
+            writeRequest(request);
+
+            String recv;
+            Set<String> recvIdSet;
+            do {
+                recv = readResponse();
+                recvIdSet = extractIdSet(recv);
+                if(!sentIdSet.equals(recvIdSet)) {
+                    log.info("Discarding stale response with ids " + recvIdSet + " (expected " + sentIdSet + ")");
+                }
+            } while(!sentIdSet.equals(recvIdSet));
+
+            return recv;
+        } finally {
+            clientRequestLock.unlock();
+        }
+    }
+
+    protected void writeRequest(String request) throws IOException {
+        if(log.isTraceEnabled()) {
+            log.trace("Sending to electrum server at " + server + ": " + request);
+        }
+
+        if(socket == null) {
+            throw new IllegalStateException("Socket connection has not been established.");
+        }
+
+        wireLog.info("> " + request);
+
+        PrintWriter out = new PrintWriter(new BufferedWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8)));
+        out.println(request);
+        out.flush();
+    }
+
+    private String readResponse() throws IOException {
+        if(firstRead) {
+            try {
+                //Ensure read thread has started
+                if(!readReadySignal.await(2, TimeUnit.SECONDS)) {
+                    throw new IOException("Read thread did not start");
+                }
+            } catch(InterruptedException e) {
+                throw new IOException("Read ready await interrupted");
+            }
+        }
+
+        try {
+            if(!readLock.tryLock((readTimeouts[readTimeoutIndex] * 1000L) + (requestIdCount * PER_REQUEST_READ_TIMEOUT_MILLIS), TimeUnit.MILLISECONDS)) {
+                readTimeoutIndex = Math.min(readTimeoutIndex + 1, readTimeouts.length - 1);
+                log.warn("No response from server, setting read timeout to " + readTimeouts[readTimeoutIndex] + " secs");
+                throw new IOException("No response from server");
+            }
+        } catch(InterruptedException e) {
+            throw new IOException("Read thread interrupted");
+        }
+
+        if(readTimeoutIndex == readTimeouts.length - 1) {
+            readTimeoutIndex--;
+        }
+
+        try {
+            if(firstRead) {
+                readingCondition.signal();
+                firstRead = false;
+            }
+
+            while(reading && running) {
+                try {
+                    readingCondition.await();
+                } catch(InterruptedException e) {
+                    //Restore interrupt status and break
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+
+            if(lastException != null) {
+                throw new IOException("Error reading response: " + lastException.getMessage(), lastException);
+            }
+
+            if(!running) {
+                throw new IOException("Transport closed");
+            }
+
+            reading = true;
+
+            readingCondition.signal();
+            return response;
+        } finally {
+            readLock.unlock();
+        }
+    }
+
+    public void readInputLoop() throws ServerException {
+        BufferedReader in;
+        try {
+            in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+        } catch(IOException e) {
+            if(!closed) {
+                log.error("Error opening socket inputstream", e);
+            }
+            if(running) {
+                signalException(e);
+                running = false;
+            }
+            return;
+        }
+
+        //Wait for first RPC request before starting to read. The lock must be acquired before
+        //signaling readiness so readResponse() blocks until we reach the atomic await/unlock.
+        readLock.lock();
+        try {
+            readReadySignal.countDown();
+            if(running) {
+                readingCondition.await();
+            }
+        } catch(InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        } finally {
+            readLock.unlock();
+        }
+
+        while(running) {
+            try {
+                String received = readInputStream(in);
+                wireLog.info("< " + received);
+                if(isNotification(received)) {
+                    jsonRpcServer.handle(received, subscriptionService);
+                } else {
+                    deliverResponse(received);
+                }
+            } catch(InterruptedException e) {
+                //Restore interrupt status and continue
+                Thread.currentThread().interrupt();
+            } catch(Exception e) {
+                if(!closed) {
+                    log.trace("Connection error while reading", e);
+                }
+                if(running) {
+                    signalException(e);
+                    //Allow this thread to terminate as we will need to reconnect with a new transport anyway
+                    running = false;
+                }
+            }
+        }
+    }
+
+    private void deliverResponse(String received) throws InterruptedException {
+        readLock.lock();
+        try {
+            response = received;
+            reading = false;
+            readingCondition.signal();
+            while(!reading && running) {
+                readingCondition.await();
+            }
+        } finally {
+            readLock.unlock();
+        }
+    }
+
+    private void signalException(Exception e) {
+        readLock.lock();
+        try {
+            lastException = e;
+            reading = false;
+            readingCondition.signal();
+        } finally {
+            readLock.unlock();
+        }
+    }
+
+    protected String readInputStream(BufferedReader in) throws IOException {
+        String response = readLine(in);
+
+        if(response == null) {
+            throw new IOException("Could not connect to server" + (Config.get().hasServer() ? " at " + Config.get().getServer().getUrl() : ""));
+        }
+
+        return response;
+    }
+
+    private String readLine(BufferedReader in) throws IOException {
+        while(!socket.isClosed()) {
+            try {
+                return in.readLine();
+            } catch(SocketTimeoutException e) {
+                //ignore and continue
+            }
+        }
+
+        return null;
+    }
+
+    public void connect() throws ServerException {
+        try {
+            createSocket();
+            log.debug("Created " + socket);
+            socket.setSoTimeout(SOCKET_READ_TIMEOUT_MILLIS);
+            running = true;
+        } catch(SSLHandshakeException e) {
+            throw new TlsServerException(server, e);
+        } catch(IOException e) {
+            if(e.getStackTrace().length > 0 && e.getStackTrace()[0].getClassName().contains("SocksSocketImpl")) {
+                throw new ProxyServerException(e);
+            }
+
+            throw new ServerException(e);
+        }
+    }
+
+    public boolean isConnected() {
+        return socket != null && running && !closed;
+    }
+
+    protected void createSocket() throws IOException {
+        socket = socketFactory.createSocket();
+        socket.connect(socketFactory instanceof ProxySocketFactory ?
+                InetSocketAddress.createUnresolved(server.getHost(), server.getPortOrDefault(getDefaultPort())) :
+                new InetSocketAddress(server.getHost(), server.getPortOrDefault(getDefaultPort())));
+    }
+
+    protected int getDefaultPort() {
+        return Protocol.TCP.getDefaultPort();
+    }
+
+    public boolean isClosed() {
+        return closed;
+    }
+
+    @Override
+    public void close() throws IOException {
+        running = false;
+        closed = true;
+
+        readLock.lock();
+        try {
+            readingCondition.signalAll();
+        } finally {
+            readLock.unlock();
+        }
+
+        if(socket != null) {
+            socket.close();
+        }
+    }
+
+    @Override
+    public int getTimeoutCount() {
+        return readTimeoutIndex;
+    }
+
+    private static boolean isNotification(String json) {
+        try(JsonParser parser = JSON_FACTORY.createParser(json)) {
+            if(parser.nextToken() != JsonToken.START_OBJECT) {
+                return false;
+            }
+            while(parser.nextToken() == JsonToken.FIELD_NAME) {
+                String field = parser.currentName();
+                JsonToken value = parser.nextToken();
+                if("method".equals(field)) {
+                    return value == JsonToken.VALUE_STRING;
+                }
+                parser.skipChildren();
+            }
+            return false;
+        } catch(Exception e) {
+            log.warn("Could not parse JSON-RPC message from server: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static Set<String> extractIdSet(String json) {
+        if(json == null || json.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Matcher m = ID_PATTERN.matcher(json);
+        Set<String> ids = new LinkedHashSet<>();
+        while(m.find()) {
+            ids.add(m.group(1));
+        }
+        return ids;
+    }
+}
