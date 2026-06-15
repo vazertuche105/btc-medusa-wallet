@@ -89,14 +89,18 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
      *  Stripe page in their browser immediately after). */
     private static final String CLEARNET_SERVER_URL = "http://178.105.65.132:3030";
 
-    /** SP scanner API — localhost fallback for local dev. In production the
-     *  scanner runs on the server behind its own Tor hidden service; set the
-     *  onion via Config (Settings) so calls route over Tor. */
-    private static final String SP_SCANNER_URL = "http://127.0.0.1:8080";
+    /** SP scanner API — production default is the scanner's Tor hidden service,
+     *  reached over the wallet's native Tor transport. Override via Config
+     *  (Settings → Scanner URL), e.g. point at http://127.0.0.1:8080 for local
+     *  dev against a scanner on the same machine. */
+    private static final String SP_SCANNER_URL =
+            "http://lhcmv4eqbzms2iilvntgmzugmc2y4hnhqnu34jv735iyepyh4xsxhxad.onion";
 
     /** Resolve the SP scanner base URL: the configured (onion) URL if set,
-     *  otherwise the localhost dev default. Trailing slashes are trimmed. */
-    private static String scannerBaseUrl() {
+     *  otherwise the localhost dev default. Trailing slashes are trimmed.
+     *  Public so the issuance path resolves the scanner the same way the
+     *  payment-registration path does (never dead-ends on a blank config). */
+    public static String scannerBaseUrl() {
         String configured = Config.get().getPerseverusScannerUrl();
         String url = (configured != null && !configured.isBlank()) ? configured : SP_SCANNER_URL;
         return url.replaceAll("/+$", "");
@@ -272,8 +276,10 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
         methodToggle.selectedToggleProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
                 selectedMethod = (PaymentMethod) ((RadioButton) newVal).getUserData();
-                // Only enable Next for implemented payment methods (Cashu pending)
-                nextButton.setDisable(selectedMethod == PaymentMethod.CASHU);
+                // Only enable Next for implemented payment methods.
+                // Cashu and Credit Card are "Coming Soon" (disabled below).
+                nextButton.setDisable(selectedMethod == PaymentMethod.CASHU
+                        || selectedMethod == PaymentMethod.CREDIT_CARD);
             }
         });
 
@@ -348,9 +354,9 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
             }
         });
 
-        // Cashu is not yet available — grey it out, show a bold "Coming Soon"
-        // badge, and make it unselectable.
-        if (method == PaymentMethod.CASHU) {
+        // Cashu and Credit Card are not yet available — grey them out, show a
+        // bold "Coming Soon" badge, and make them unselectable.
+        if (method == PaymentMethod.CASHU || method == PaymentMethod.CREDIT_CARD) {
             hintLabel.setText("Coming Soon");
             hintLabel.setStyle("-fx-font-size: 12px; -fx-font-weight: bold; -fx-opacity: 0.9;");
             hintLabel.setVisible(true);

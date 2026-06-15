@@ -41,7 +41,8 @@
                                 <Label fx:id="utxoSummary" text="0 total" />
                             </Field>
                             <Field text="Status:">
-                                <Label fx:id="scanStatus" text="Not scanned" maxWidth="Infinity" />
+                                <Label fx:id="scanStatus" text="Not scanned" />
+                                <Hyperlink fx:id="scanStatusTxLink" visible="false" managed="false" />
                             </Field>
                         </Fieldset>
                     </Form>

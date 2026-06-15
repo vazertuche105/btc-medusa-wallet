@@ -2925,23 +2925,31 @@ public class AppController implements Initializable {
     @Subscribe
     public void versionUpdated(VersionUpdatedEvent event) {
         Hyperlink versionUpdateLabel = new Hyperlink("Sparrow " + event.getVersion() + " available");
+        versionUpdateLabel.setId("sparrowVersionLink");
         versionUpdateLabel.getStyleClass().add("version-hyperlink");
         versionUpdateLabel.setOnAction(event1 -> {
             AppServices.get().getApplication().getHostServices().showDocument("https://www.sparrowwallet.com/download");
         });
+        replaceStatusBarHyperlink("sparrowVersionLink", versionUpdateLabel);
+    }
 
-        Hyperlink existingUpdateLabel = null;
-        for(Node node : statusBar.getRightItems()) {
-            if(node instanceof Hyperlink) {
-                existingUpdateLabel = (Hyperlink)node;
-            }
-        }
+    @Subscribe
+    public void medusaVersionUpdated(MedusaVersionUpdatedEvent event) {
+        Hyperlink versionUpdateLabel = new Hyperlink(SparrowWallet.MEDUSA_NAME + " " + event.getVersion() + " available");
+        versionUpdateLabel.setId("medusaVersionLink");
+        versionUpdateLabel.getStyleClass().add("version-hyperlink");
+        versionUpdateLabel.setOnAction(event1 -> {
+            AppServices.get().getApplication().getHostServices().showDocument("https://www.btcmedusa.com/install.html");
+        });
+        replaceStatusBarHyperlink("medusaVersionLink", versionUpdateLabel);
+    }
 
-        if(existingUpdateLabel != null) {
-            statusBar.getRightItems().remove(existingUpdateLabel);
-        }
-
-        statusBar.getRightItems().add(0, versionUpdateLabel);
+    /** Add (or replace) a status-bar update hyperlink, keyed by id so the
+     *  Sparrow and BTC Medusa notices each manage their own slot and can
+     *  coexist without clobbering each other. */
+    private void replaceStatusBarHyperlink(String id, Hyperlink newLink) {
+        statusBar.getRightItems().removeIf(node -> id.equals(node.getId()));
+        statusBar.getRightItems().add(0, newLink);
     }
 
     @Subscribe

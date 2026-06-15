@@ -85,6 +85,9 @@ public class PrivacyController extends WalletFormController implements Initializ
     @FXML private Label letterGrade;
     @FXML private Label utxoSummary;
     @FXML private Label scanStatus;
+    @FXML private Hyperlink scanStatusTxLink;
+    /** The broadcast txid currently shown as a clickable link in the status row, or null. */
+    private volatile String statusTxid;
     @FXML private ProgressBar scanProgress;
     @FXML private HBox scanProgressBox;
     @FXML private Label scanProgressLabel;
@@ -210,6 +213,10 @@ public class PrivacyController extends WalletFormController implements Initializ
                         ? getWalletForm().getWallet().getFullDisplayName() : "unknown";
                 PrivacyLog.get().info("[STATUS " + walletName + "] " + newText);
             }
+            // Show the clickable txid link while the status is a broadcast/waiting
+            // message (and hide it otherwise). Centralized here so every code path
+            // that sets a "Payment broadcast …" status gets the link for free.
+            refreshStatusTxLink();
         });
 
         resultsTable.setEditable(true);
@@ -1019,6 +1026,37 @@ public class PrivacyController extends WalletFormController implements Initializ
         connRow.getChildren().addAll(new Label("Server Pubkey (G1 hex):"), serverPubkeyField, connectButton, connectionStatus);
         root.getChildren().add(connRow);
 
+        // ── Scanner URL row ──
+        // The SP scanner verifies the on-chain payment and returns the
+        // proof-of-payment code used to mint tokens. Leave blank to use the
+        // built-in default (localhost dev). In production set the scanner's
+        // .onion or http URL here.
+        TextField scannerUrlField = new TextField();
+        scannerUrlField.setPromptText("http://127.0.0.1:8080  or  your scanner .onion / server URL");
+        // Pre-fill with the effective scanner URL: the saved config value if
+        // set, otherwise the built-in production default (the scanner onion) —
+        // the same value issuance falls back to — so the field is never blank
+        // and the user can see/keep the default without typing it.
+        String curScanner = Config.get().getPerseverusScannerUrl();
+        scannerUrlField.setText((curScanner != null && !curScanner.isBlank())
+                ? curScanner
+                : PerseverusSignUpWizard.scannerBaseUrl());
+        HBox.setHgrow(scannerUrlField, Priority.ALWAYS);
+        Label scannerSavedLabel = new Label();
+        scannerSavedLabel.setStyle("-fx-text-fill: #27ae60; -fx-font-size: 11;");
+        Button saveScannerButton = new Button("Save");
+        saveScannerButton.setOnAction(e -> {
+            String v = scannerUrlField.getText() == null ? "" : scannerUrlField.getText().trim();
+            Config.get().setPerseverusScannerUrl(v.isBlank() ? null : v);
+            scannerSavedLabel.setText("Saved ✓");
+            log.info("[perseverus] Scanner URL set to {}", v.isBlank() ? "(cleared — using default)" : v);
+        });
+        scannerUrlField.textProperty().addListener((o, ov, nv) -> scannerSavedLabel.setText(""));
+        HBox scannerRow = new HBox(10);
+        scannerRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+        scannerRow.getChildren().addAll(new Label("Scanner URL:"), scannerUrlField, saveScannerButton, scannerSavedLabel);
+        root.getChildren().add(scannerRow);
+
         // ── Issue row ──
         // Pack Size + "Issue Tokens" are intentionally NOT in the layout:
         // tokens are only obtained through the paid sign-up flows (pack size
@@ -1027,7 +1065,7 @@ public class PrivacyController extends WalletFormController implements Initializ
         // connect/issue state toggles still reference them.
         HBox issueRow = new HBox(15);
         issueRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-        issueRow.getChildren().addAll(refreshPacksButton, clearPacksButton, issueStatus);
+        issueRow.getChildren().addAll(refreshPacksButton, issueStatus);
         root.getChildren().add(issueRow);
 
         // ── Packs table ──
@@ -2527,6 +2565,13 @@ public class PrivacyController extends WalletFormController implements Initializ
         status.setAlignment(javafx.geometry.Pos.CENTER);
         status.setMaxWidth(400);
 
+        Label closeHint = new Label("It's OK to close this window. Updates will still be provided on the Privacy tab.");
+        closeHint.setStyle("-fx-font-size: 11px; -fx-opacity: 0.7; -fx-font-style: italic;");
+        closeHint.setWrapText(true);
+        closeHint.setAlignment(javafx.geometry.Pos.CENTER);
+        closeHint.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
+        closeHint.setMaxWidth(400);
+
         Region spacer = new Region();
         spacer.setPrefHeight(5);
 
@@ -2538,10 +2583,10 @@ public class PrivacyController extends WalletFormController implements Initializ
         VBox content = new VBox(12);
         content.setAlignment(javafx.geometry.Pos.CENTER);
         if (logo != null) content.getChildren().add(logo);
-        content.getChildren().addAll(title, planInfo, spinner, status, spacer, closeBtn);
+        content.getChildren().addAll(title, planInfo, spinner, status, closeHint, spacer, closeBtn);
 
         root.getChildren().add(content);
-        Scene paymentScene = new Scene(root, 460, 320);
+        Scene paymentScene = new Scene(root, 460, 380);
         applyDialogTheme(paymentScene);
         popup.setScene(paymentScene);
 
@@ -2614,6 +2659,59 @@ public class PrivacyController extends WalletFormController implements Initializ
      * and set the "waiting for confirmation" status. Idempotent — updates the
      * existing row if already shown.
      */
+    /**
+     * Record the broadcast txid that should back the clickable link in the
+     * Privacy tab's "Status:" row, then refresh visibility. Pass {@code null}
+     * to forget it. Must be called on the FX thread.
+     */
+    private void setStatusTxid(String txidHex) {
+        statusTxid = (txidHex == null || txidHex.isBlank()) ? null : txidHex;
+        refreshStatusTxLink();
+    }
+
+    /**
+     * Show or hide the clickable mempool.space link beside the status text. The
+     * link appears whenever the status is a broadcast/waiting message and a
+     * pending-payment txid is known (from {@link #setStatusTxid}, the hot-wallet
+     * txid, the shared pending txid, or the forwarded tx2). Driven by the status
+     * listener in {@link #initializeView()}, so it covers every code path that
+     * sets a "Payment broadcast …" status. Must be called on the FX thread.
+     */
+    private void refreshStatusTxLink() {
+        if (scanStatusTxLink == null) {
+            return;
+        }
+        String txid = statusTxid;
+        if ((txid == null || txid.isBlank())) txid = hotWalletPaymentTxid;
+        if ((txid == null || txid.isBlank()) && shared != null) txid = shared.pendingHotPaymentTxid;
+        if ((txid == null || txid.isBlank())) txid = watchOnlyTx2TxidHex;
+
+        String text = (scanStatus != null) ? scanStatus.getText() : null;
+        boolean waiting = text != null
+                && (text.contains("broadcast") || text.toLowerCase().contains("waiting for"));
+
+        if (txid == null || txid.isBlank() || !waiting) {
+            scanStatusTxLink.setVisible(false);
+            scanStatusTxLink.setManaged(false);
+            scanStatusTxLink.setOnAction(null);
+            return;
+        }
+        final String full = txid;
+        String shortTxid = full.length() > 16
+                ? full.substring(0, 10) + "…" + full.substring(full.length() - 6)
+                : full;
+        scanStatusTxLink.setText(shortTxid + " ↗");
+        scanStatusTxLink.setStyle("-fx-font-family: monospace;");
+        scanStatusTxLink.setTooltip(new Tooltip("Open in mempool.space\n" + full));
+        scanStatusTxLink.setOnAction(e -> {
+            String network = PerseverusPaymentManager.isTestnet() ? "/testnet" : "";
+            AppServices.get().getApplication().getHostServices()
+                    .showDocument("https://mempool.space" + network + "/tx/" + full);
+        });
+        scanStatusTxLink.setVisible(true);
+        scanStatusTxLink.setManaged(true);
+    }
+
     private void setPaymentPopupTxid(String txidHex) {
         if (paymentPopupStatus != null) {
             paymentPopupStatus.setText("Payment seen — waiting for block confirmation…");
@@ -2716,7 +2814,11 @@ public class PrivacyController extends WalletFormController implements Initializ
             txidTmp = hotWalletPaymentTxid;
         }
         final String spTxid = (txidTmp != null && !txidTmp.isBlank()) ? txidTmp : null;
-        String scannerUrlTmp = Config.get().getPerseverusScannerUrl();
+        // Resolve the scanner URL the SAME way the payment-registration path does
+        // (configured URL → localhost dev fallback). Previously this path alone
+        // hard-required a config value, so a confirmed payment could dead-end at
+        // the mint step even though the rest of the flow had reached the scanner.
+        String scannerUrlTmp = PerseverusSignUpWizard.scannerBaseUrl();
         final String scannerUrl = (scannerUrlTmp != null && !scannerUrlTmp.isBlank()) ? scannerUrlTmp : null;
 
         // ── PAYMENT GATE ──────────────────────────────────────────────────
@@ -5644,6 +5746,7 @@ public class PrivacyController extends WalletFormController implements Initializ
                     // Unconfirmed — show popup and wait for confirmation
                     Platform.runLater(() -> {
                         scanStatus.setText("Payment broadcast — waiting for block confirmation...");
+                        setStatusTxid(hotWalletPaymentTxid);
                         if (pendingPopupAmount > 0 && pendingPopupLabel != null) {
                             showPaymentStatusPopup(pendingPopupAmount, pendingPopupLabel);
                         }
@@ -5761,9 +5864,8 @@ public class PrivacyController extends WalletFormController implements Initializ
                             issueTokensAfterSpConfirmation();
                         } else {
                             Platform.runLater(() -> {
-                                String shortTxid = txidStr.length() > 12
-                                        ? txidStr.substring(0, 12) + "..." : txidStr;
-                                scanStatus.setText("Payment broadcast (" + shortTxid + ") — waiting for confirmation...");
+                                scanStatus.setText("Payment broadcast — waiting for confirmation...");
+                                setStatusTxid(txidStr);
                                 if (pendingPopupAmount > 0 && pendingPopupLabel != null) {
                                     showPaymentStatusPopup(pendingPopupAmount, pendingPopupLabel);
                                 }

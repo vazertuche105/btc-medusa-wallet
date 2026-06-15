@@ -20,6 +20,11 @@ public class SparrowWallet {
     public static final String APP_NAME = "Sparrow";
     public static final String APP_VERSION = "2.5.2";
     public static final String APP_VERSION_SUFFIX = "";
+    /** BTC Medusa plugin release version. Checked against btcmedusa.com/version
+     *  independently of Sparrow's own update check — bump this on each release
+     *  and publish {"version":"<new>"} at that URL so older clients get notified. */
+    public static final String MEDUSA_VERSION = "1.0.0";
+    public static final String MEDUSA_NAME = "BTC Medusa";
     public static final String APP_HOME_PROPERTY = "sparrow.home";
     public static final String NETWORK_ENV_PROPERTY = "SPARROW_NETWORK";
     public static final String JPACKAGE_APP_PATH = "jpackage.app-path";
