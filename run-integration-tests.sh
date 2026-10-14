@@ -11,7 +11,7 @@
 # Environment variables (all optional):
 #   MOCK_PORT       — port for the mock server (default: 3030)
 #   SKIP_BUILD      — set to "1" to skip cargo build steps
-#   PERSEVERUS_DIR  — path to perseverus repo (default: ../perseverus)
+#   PERSEVERUS_DIR  — path to the perseverus-sdk repo (default: ../perseverus-sdk)
 #   MOCK_SERVER_DIR — path to mock server crate (default: ../perseverus-mock-server)
 #
 set -euo pipefail
@@ -21,7 +21,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MOCK_PORT="${MOCK_PORT:-3030}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
-PERSEVERUS_DIR="${PERSEVERUS_DIR:-$SCRIPT_DIR/../perseverus}"
+# Client crates (incl. the JNI cdylib) live in the public perseverus-sdk repo.
+PERSEVERUS_DIR="${PERSEVERUS_DIR:-$SCRIPT_DIR/../perseverus-sdk}"
 MOCK_SERVER_DIR="${MOCK_SERVER_DIR:-$SCRIPT_DIR/../perseverus-mock-server}"
 
 MOCK_URL="http://localhost:${MOCK_PORT}"
@@ -90,7 +91,7 @@ fi
 if [ ! -f "$LIB_PATH" ]; then
     echo "ERROR: JNI library not found at ${LIB_PATH}"
     echo "Run without SKIP_BUILD=1, or build manually:"
-    echo "  cd ${PERSEVERUS_DIR} && cargo build --release -p perseverus-client-native"
+    echo "  cd ${PERSEVERUS_DIR} && cargo build --release -p perseverus-client-native --features jni"
     exit 1
 fi
 

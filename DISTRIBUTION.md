@@ -110,7 +110,8 @@ This removes every Gatekeeper warning — users just double-click. You need an
   that same `Info.plist` (`NSCameraUsageDescription`) — don't remove it.
 - **"libperseverus_client_native not found":** the arm64 dylib must be at
   `src/main/resources/native/osx/aarch64/`. Re-run without `SKIP_NATIVE=1`, or
-  build it: `cd ../perseverus/client-native && cargo build --release`.
+  build it: `cd ../perseverus-sdk && cargo build --release -p perseverus-client-native --features jni`
+  (output: `../perseverus-sdk/target/release/`).
 - **Intel Mac users:** this build is arm64-only and won't run on Intel. Making a
   universal build means building the dylib for `x86_64` too and merging with
   `lipo` — ask and I'll wire that up.

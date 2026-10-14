@@ -59,16 +59,23 @@ if command -v iconutil >/dev/null 2>&1 && [[ -d "$ICONSET" ]]; then
 fi
 
 # ── 2. (Optional) Rebuild the native Rust dylib (arm64) and refresh resources ─
-NATIVE_SRC="../perseverus/client-native"
+# The client crates live in the public perseverus-sdk repo, checked out next to
+# this one (Patent/perseverus-sdk). Override with PERSEVERUS_SDK_DIR=...
+SDK_DIR="${PERSEVERUS_SDK_DIR:-../perseverus-sdk}"
 DYLIB_DEST="src/main/resources/native/osx/aarch64/libperseverus_client_native.dylib"
-if [[ "${SKIP_NATIVE:-0}" != "1" && -d "$NATIVE_SRC" ]] && command -v cargo >/dev/null 2>&1; then
-  echo "==> Rebuilding native dylib (cargo build --release)"
-  ( cd "$NATIVE_SRC" && cargo build --release )
-  BUILT="$NATIVE_SRC/target/release/libperseverus_client_native.dylib"
+if [[ "${SKIP_NATIVE:-0}" != "1" && -d "$SDK_DIR/client-native" ]] && command -v cargo >/dev/null 2>&1; then
+  echo "==> Rebuilding native dylib from $SDK_DIR (cargo build --release --features jni)"
+  # --features jni compiles the Java_* entry points Native.java calls; the
+  # workspace puts its output in $SDK_DIR/target, not client-native/target.
+  ( cd "$SDK_DIR" && cargo build --release -p perseverus-client-native --features jni )
+  BUILT="$SDK_DIR/target/release/libperseverus_client_native.dylib"
   if [[ -f "$BUILT" ]]; then
     mkdir -p "$(dirname "$DYLIB_DEST")"
     cp "$BUILT" "$DYLIB_DEST"
     echo "    copied $(basename "$BUILT") -> $DYLIB_DEST"
+  else
+    echo "ERROR: expected $BUILT after the build" >&2
+    exit 1
   fi
 else
   echo "==> Skipping native rebuild (using committed dylib at $DYLIB_DEST)"
