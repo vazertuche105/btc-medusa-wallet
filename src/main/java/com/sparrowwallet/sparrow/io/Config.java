@@ -1032,7 +1032,8 @@ public class Config {
         DIRECT("Direct", "No privacy relay — reveals your IP to the BTC Medusa server"),
         OHTTP("OHTTP", "Oblivious HTTP — hides your IP via a relay (coming soon)"),
         TOR("Tor", "Routes through the Tor network for maximum anonymity"),
-        AUTO("Auto", "Tor, with automatic fallback (OHTTP fallback coming soon)");
+        /** Older setting, now identical to TOR: it never falls back to clearnet. */
+        AUTO("Auto", "Same as Tor (older setting)");
 
         private final String label;
         private final String description;
@@ -1048,15 +1049,19 @@ public class Config {
 
     public PerseverusTransport getPerseverusTransport() {
         if (perseverusTorEnabled) return PerseverusTransport.TOR;
-        if (perseverusTransportMode == null) return PerseverusTransport.AUTO; // default — cascading fallback
+        // Default and legacy "AUTO" both mean Tor. Clearnet (DIRECT) is only
+        // ever used when the user explicitly chose it and accepted the warning.
+        if (perseverusTransportMode == null) return PerseverusTransport.TOR;
         try {
-            return PerseverusTransport.valueOf(perseverusTransportMode);
+            PerseverusTransport t = PerseverusTransport.valueOf(perseverusTransportMode);
+            return t == PerseverusTransport.AUTO ? PerseverusTransport.TOR : t;
         } catch (IllegalArgumentException e) {
-            return PerseverusTransport.AUTO;
+            return PerseverusTransport.TOR;
         }
     }
 
     public void setPerseverusTransport(PerseverusTransport mode) {
+        if (mode == PerseverusTransport.AUTO) mode = PerseverusTransport.TOR;
         this.perseverusTransportMode = mode.name();
         this.perseverusTorEnabled = (mode == PerseverusTransport.TOR || mode == PerseverusTransport.AUTO);
         flush();

@@ -93,8 +93,8 @@ public final class PerseverusService implements AutoCloseable {
             log.info("Native transport configured: mode={}, param={}",
                     transport.name(), param != null ? param : "(default)");
         } catch (UnsatisfiedLinkError e) {
-            log.warn("Native configureTransport not available — transport will default to DIRECT. " +
-                    "Rebuild client-native with transport support to enable OHTTP/Tor.");
+            log.warn("Native configureTransport not available — the native library defaults to Tor " +
+                    "(fails closed if Tor isn't running). Rebuild client-native to apply the configured mode.");
         }
     }
 

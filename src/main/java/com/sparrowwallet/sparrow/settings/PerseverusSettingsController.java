@@ -75,7 +75,8 @@ public class PerseverusSettingsController extends SettingsDetailController {
     @Override
     public void initializeView(Config config) {
         // ── Transport mode combo ────────────────────────────────────────
-        transportMode.getItems().setAll(PerseverusTransport.values());
+        // AUTO is a legacy alias for TOR and isn't offered any more.
+        transportMode.getItems().setAll(PerseverusTransport.TOR, PerseverusTransport.DIRECT, PerseverusTransport.OHTTP);
         transportMode.setCellFactory(param -> new ListCell<>() {
             @Override
             protected void updateItem(PerseverusTransport item, boolean empty) {
@@ -159,7 +160,10 @@ public class PerseverusSettingsController extends SettingsDetailController {
                     PerseverusTransport prev = (oldVal != null && oldVal != PerseverusTransport.DIRECT)
                             ? oldVal : PerseverusTransport.TOR;
                     transportReverting = true;
-                    Platform.runLater(() -> transportMode.setValue(prev));
+                    Platform.runLater(() -> {
+                        transportMode.setValue(prev);
+                        torEnabled.setSelected(prev == PerseverusTransport.TOR);
+                    });
                     return;
                 }
             }
@@ -207,10 +211,9 @@ public class PerseverusSettingsController extends SettingsDetailController {
             if (isSelected) {
                 transportMode.setValue(PerseverusTransport.TOR);
             } else {
-                // OHTTP isn't available yet, so turning Tor off falls back to
-                // AUTO (Tor-first; never silently clearnet). To actually use
-                // clearnet the user must pick "Direct" and accept the warning.
-                transportMode.setValue(PerseverusTransport.AUTO);
+                // Turning Tor off means clearnet, so it goes through the
+                // Direct warning; cancelling it switches Tor back on.
+                transportMode.setValue(PerseverusTransport.DIRECT);
             }
         });
 
@@ -434,8 +437,14 @@ public class PerseverusSettingsController extends SettingsDetailController {
                 transportStatus.setStyle("-fx-text-fill: #2e7d32;");
                 break;
             case TOR:
-                transportStatus.setText("Tor active — maximum anonymity");
-                transportStatus.setStyle("-fx-text-fill: #2e7d32;");
+            case AUTO:
+                if (isLocalTorListening()) {
+                    transportStatus.setText("Tor active — maximum anonymity");
+                    transportStatus.setStyle("-fx-text-fill: #2e7d32;");
+                } else {
+                    transportStatus.setText("Tor isn't running on 127.0.0.1:9050 — start Tor to use BTC Medusa.");
+                    transportStatus.setStyle("-fx-text-fill: #c62828;");
+                }
                 break;
         }
     }
@@ -507,6 +516,17 @@ public class PerseverusSettingsController extends SettingsDetailController {
                 serverUrl.setText(CLEARNET_URL);
                 config.setPerseverusServerUrl(CLEARNET_URL);
             }
+        }
+    }
+
+    /** Whether something accepts connections on the local Tor SOCKS port
+     *  (127.0.0.1:9050). A local check only; nothing is sent. */
+    private static boolean isLocalTorListening() {
+        try (java.net.Socket sock = new java.net.Socket()) {
+            sock.connect(new java.net.InetSocketAddress("127.0.0.1", 9050), 500);
+            return true;
+        } catch (java.io.IOException e) {
+            return false;
         }
     }
 }
