@@ -73,7 +73,6 @@ public class PrivacyController extends WalletFormController implements Initializ
     /** Default Perseverus server URL — .onion for production (routed via Tor).
      *  During testing, override in the Privacy tab UI with the clearnet IP. */
     private static final String DEFAULT_SERVER_URL = "http://medusayl5rrmgnekpabcduw7onhvdowmfart2mulq3b64chgzng52had.onion";
-    private static final String CLEARNET_SERVER_IP = "http://178.105.65.132:3030";
 
     /** Default number of decoy blocks per query for privacy */
     private static final int DEFAULT_DECOYS = 10;
@@ -589,12 +588,10 @@ public class PrivacyController extends WalletFormController implements Initializ
 
                 // Fetch the server's live OPRF pubkey.
                 // Try native transport first (Tor/.onion), then clearnet fallback.
+                // Only over the configured (Tor) transport. There is no clearnet
+                // fallback: a plain-HTTP fetch reveals the user's IP and lets
+                // anyone on the path substitute the server key (review F11).
                 String livePubkey = fetchServerPubkey(url);
-                if ((livePubkey == null || livePubkey.isBlank()) && needsFreshPubkey) {
-                    // Tor might not be ready yet — try clearnet IP directly
-                    log.info("Auto-connect: Tor pubkey fetch failed, trying clearnet fallback");
-                    livePubkey = fetchServerPubkeyJava(CLEARNET_SERVER_IP + "/server/pubkey");
-                }
                 final String effectivePubkey;
                 if (livePubkey != null && !livePubkey.isBlank()) {
                     effectivePubkey = livePubkey;
@@ -3335,39 +3332,10 @@ public class PrivacyController extends WalletFormController implements Initializ
             if (quote1 < 0 || quote2 < 0) return null;
             return json.substring(quote1 + 1, quote2);
         } catch (UnsatisfiedLinkError e) {
-            log.warn("Native httpGet not available — falling back to Java HTTP for pubkey fetch");
-            return fetchServerPubkeyJava(fullUrl);
+            log.warn("Native transport not available — not fetching the server key over clearnet");
+            return null;
         } catch (Exception e) {
             log.debug("Failed to fetch server pubkey via native transport: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    /** Java HTTP fallback for pubkey fetch — only works for clearnet URLs. */
-    private String fetchServerPubkeyJava(String fullUrl) {
-        try {
-            URL url = new URL(fullUrl);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(5_000);
-            conn.setReadTimeout(5_000);
-            if (conn.getResponseCode() != 200) return null;
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream()))) {
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = br.readLine()) != null) sb.append(line);
-                String json = sb.toString();
-                int idx = json.indexOf("\"pubkey_hex\"");
-                if (idx < 0) return null;
-                int colon = json.indexOf(':', idx);
-                int quote1 = json.indexOf('"', colon + 1);
-                int quote2 = json.indexOf('"', quote1 + 1);
-                if (quote1 < 0 || quote2 < 0) return null;
-                return json.substring(quote1 + 1, quote2);
-            }
-        } catch (Exception e) {
-            log.debug("Failed to fetch server pubkey via Java HTTP: {}", e.getMessage());
             return null;
         }
     }

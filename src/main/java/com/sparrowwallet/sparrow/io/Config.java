@@ -1088,12 +1088,17 @@ public class Config {
         flush();
     }
 
+    /** Fewest decoys per real block. Matches the SDK's MIN_DECOYS_PER_INPUT;
+     *  below this the native lookup refuses to fetch (security review F11/F14). */
+    public static final int MIN_PERSEVERUS_DECOYS = 4;
+
     public int getPerseverusDecoyCount() {
-        return perseverusDecoyCount;
+        // Older configs may hold 0–3; never hand those to the scanner.
+        return Math.max(MIN_PERSEVERUS_DECOYS, Math.min(100, perseverusDecoyCount));
     }
 
     public void setPerseverusDecoyCount(int count) {
-        this.perseverusDecoyCount = Math.max(0, Math.min(100, count));
+        this.perseverusDecoyCount = Math.max(MIN_PERSEVERUS_DECOYS, Math.min(100, count));
         flush();
     }
 

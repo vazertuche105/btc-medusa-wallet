@@ -28,9 +28,6 @@ import org.slf4j.LoggerFactory;
 
 import java.net.URL;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
@@ -84,10 +81,21 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
         }
     }
 
-    /** Clearnet API endpoint — used for Stripe flows where Tor adds
-     *  latency with zero privacy benefit (the user opens a clearnet
-     *  Stripe page in their browser immediately after). */
-    private static final String CLEARNET_SERVER_URL = "http://178.105.65.132:3030";
+    /** Default server: the onion service. Everything the wizard sends to the
+     *  server goes over the native (Tor) transport — never clearnet (review F11). */
+    private static final String DEFAULT_SERVER_URL =
+            "http://medusayl5rrmgnekpabcduw7onhvdowmfart2mulq3b64chgzng52had.onion";
+
+    /** The configured server URL, or the onion default. */
+    private static String serverBaseUrl() {
+        String url = Config.get().getPerseverusServerUrl();
+        return (url == null || url.isBlank()) ? DEFAULT_SERVER_URL : url.replaceAll("/+$", "");
+    }
+
+    /** The server's OPRF public key, fetched over Tor. */
+    private static String fetchServerPubkeyHex() throws Exception {
+        return parseJsonField(Native.httpGet(serverBaseUrl() + "/server/pubkey"), "pubkey_hex");
+    }
 
     /** SP scanner API — production default is the scanner's Tor hidden service,
      *  reached over the wallet's native Tor transport. Override via Config
@@ -979,9 +987,8 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
         Platform.runLater(() -> statusLabel.setText("Payment confirmed — issuing privacy tokens..."));
 
         try {
-            String serverUrl = CLEARNET_SERVER_URL;
-            String pubkeyJson = clearnetGet(CLEARNET_SERVER_URL + "/server/pubkey");
-            String pubkeyHex = parseJsonField(pubkeyJson, "pubkey_hex");
+            String serverUrl = serverBaseUrl();
+            String pubkeyHex = fetchServerPubkeyHex();
 
             int packSize = 100;
             int expirationMonth = currentExpirationMonth();
@@ -1350,10 +1357,10 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
 
         Thread checkoutThread = new Thread(() -> {
             try {
-                // Use clearnet for Stripe flows — no privacy benefit from
-                // Tor here since the user opens a clearnet Stripe page in
-                // their browser immediately after.
-                String serverUrl = CLEARNET_SERVER_URL;
+                // Server calls go over Tor even for card payments: the
+                // browser talks to Stripe, but our server should not learn
+                // the wallet's IP or be able to tie it to the nonce.
+                String serverUrl = serverBaseUrl();
 
                 // Step A: Create Stripe Checkout Session via our server
                 String checkoutUrl = serverUrl + "/stripe/checkout";
@@ -1362,11 +1369,11 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
                     selectedStripePlan.apiValue, nonce
                 );
 
-                log.info("[perseverus] Creating Stripe checkout (clearnet): plan={}, nonce={}",
+                log.info("[perseverus] Creating Stripe checkout: plan={}, nonce={}",
                         selectedStripePlan.apiValue, nonce);
                 PrivacyLog.get().paymentStripeStart(selectedStripePlan.apiValue);
 
-                String responseJson = clearnetPost(checkoutUrl, requestJson);
+                String responseJson = Native.httpPost(checkoutUrl, requestJson);
                 log.info("[perseverus] Checkout response: {}", responseJson);
 
                 // Parse checkout URL from response
@@ -1395,7 +1402,7 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
                     backButton.setManaged(true);
                 });
 
-                // Step C: Poll for payment confirmation (also clearnet)
+                // Step C: Poll for payment confirmation (over Tor)
                 stripePollingActive = true;
                 String statusUrl = serverUrl + "/stripe/status/" + nonce;
                 String redemptionCode = null;
@@ -1406,7 +1413,7 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
                     if (!stripePollingActive) break;
 
                     try {
-                        String statusJson = clearnetGet(statusUrl);
+                        String statusJson = Native.httpGet(statusUrl);
                         String status = parseJsonField(statusJson, "status");
 
                         if ("ready".equals(status)) {
@@ -1471,9 +1478,8 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
             // Get server pubkey for issuance client
             String pubkeyHex = Config.get().getPerseverusServerPubkey();
             if (pubkeyHex == null || pubkeyHex.isEmpty()) {
-                // Fetch from server (clearnet is fine — pubkey is public)
-                String pubkeyJson = clearnetGet(CLEARNET_SERVER_URL + "/server/pubkey");
-                pubkeyHex = parseJsonField(pubkeyJson, "pubkey_hex");
+                // Over Tor: a plain-HTTP fetch could be tampered with.
+                pubkeyHex = fetchServerPubkeyHex();
             }
 
             // Use the issuance client to prepare blinded tokens and
@@ -1719,7 +1725,7 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
             try {
                 String pubkeyHex = Config.get().getPerseverusServerPubkey();
                 if (pubkeyHex == null || pubkeyHex.isEmpty()) {
-                    pubkeyHex = parseJsonField(clearnetGet(CLEARNET_SERVER_URL + "/server/pubkey"), "pubkey_hex");
+                    pubkeyHex = fetchServerPubkeyHex();
                 }
                 int packSize = 100;
                 int expirationMonth = currentExpirationMonth();
@@ -1995,7 +2001,7 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
             try {
                 String pubkeyHex = Config.get().getPerseverusServerPubkey();
                 if (pubkeyHex == null || pubkeyHex.isEmpty()) {
-                    pubkeyHex = parseJsonField(clearnetGet(CLEARNET_SERVER_URL + "/server/pubkey"), "pubkey_hex");
+                    pubkeyHex = fetchServerPubkeyHex();
                 }
                 int packSize = Math.max(1, trialQuantity);
                 int expirationMonth = currentExpirationMonth();   // end of next month
@@ -2412,56 +2418,13 @@ public class PerseverusSignUpWizard extends Dialog<PerseverusSignUpWizard.Result
     // Clearnet HTTP helpers (Stripe flow only — no Tor)
     // ═════════════════════════════════════════════════════════════════════
 
-    /** Shared HttpClient for clearnet Stripe calls — no proxy. */
-    private static final HttpClient CLEARNET_CLIENT = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15))
-            .build();
-
-    /**
-     * POST JSON to the given URL over clearnet (no Tor, no OHTTP).
-     * Used exclusively for Stripe checkout/redeem calls where privacy
-     * transport adds latency with no benefit.
-     */
-    private static String clearnetPost(String url, String jsonBody) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(30))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
-                .build();
-        HttpResponse<String> resp = CLEARNET_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-            throw new RuntimeException("HTTP " + resp.statusCode() + ": "
-                    + resp.body().substring(0, Math.min(resp.body().length(), 500)));
-        }
-        return resp.body();
-    }
-
-    /**
-     * GET from the given URL over clearnet (no Tor).
-     * Used for polling Stripe payment status.
-     */
-    private static String clearnetGet(String url) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(15))
-                .GET()
-                .build();
-        HttpResponse<String> resp = CLEARNET_CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-            throw new RuntimeException("HTTP " + resp.statusCode() + ": "
-                    + resp.body().substring(0, Math.min(resp.body().length(), 500)));
-        }
-        return resp.body();
-    }
-
     /**
      * Fetch the current chain tip height from mempool.space.
      * Returns 0 if the request fails.
      */
     private static long fetchTipHeight() {
         try {
-            String body = clearnetGet("https://mempool.space/api/blocks/tip/height");
+            String body = Native.httpGet("https://mempool.space/api/blocks/tip/height");
             return Long.parseLong(body.trim());
         } catch (Exception e) {
             log.debug("[perseverus] Failed to fetch tip height: {}", e.getMessage());
