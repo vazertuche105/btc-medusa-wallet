@@ -675,36 +675,9 @@ public class PrivacyController extends WalletFormController implements Initializ
                 });
                 log.info("Auto-connect + bootstrap succeeded in {}ms", bElapsed);
 
-                // ── Phase 3: re-publish pack commitments ──
-                int republished = 0;
-                int republishFailed = 0;
-                int toRepublish = 0;
-                for (PackRow pr : shared.packRows) {
-                    if (pr.remaining() > 0) toRepublish++;
-                }
-                if (toRepublish > 0) {
-                    setStatus("Re-publishing " + toRepublish + " pack commitment(s)...");
-                    PrivacyLog.get().republishStart(toRepublish);
-                }
-                long republishT0 = System.currentTimeMillis();
-                for (PackRow pr : shared.packRows) {
-                    if (pr.remaining() > 0) {
-                        try {
-                            svc.republishCommitment(pr.pack);
-                            republished++;
-                        } catch (Exception re) {
-                            republishFailed++;
-                            log.warn("Failed to re-publish commitment for pack: {}",
-                                    re.getMessage());
-                        }
-                    }
-                }
-                if (toRepublish > 0) {
-                    long republishElapsed = System.currentTimeMillis() - republishT0;
-                    log.info("Re-published {} pack commitment(s) to bulletin board",
-                            republished);
-                    PrivacyLog.get().republishComplete(republished, republishFailed, republishElapsed);
-                }
+                // (No startup republish of board entries. The server keeps the
+                // board on disk now, and publishing every pack at once on each
+                // launch let the server group a wallet's packs together.)
 
                 // ── Done — push status to bottom status bar ──
                 setStatus("");
